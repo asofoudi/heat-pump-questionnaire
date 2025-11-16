@@ -3,11 +3,12 @@ from datetime import datetime
 
 st.set_page_config(
     page_title="Ερωτηματολόγιο Αντλίας Θερμότητας",
-    page_icon="🔥",
+    page_icon="logo.png",  # εδώ το logo σου
     layout="centered",
 )
-
+st.image("logo.png", width=180)
 st.title("🔥 Αλλαγή Συστήματος Θέρμανσης – Επιλογή Αντλίας Θερμότητας")
+
 st.markdown(
     "Συμπληρώστε τις παρακάτω πληροφορίες ώστε να μπορέσουμε "
     "να σας προτείνουμε την κατάλληλη αντλία θερμότητας για τον χώρο σας."
@@ -553,3 +554,4 @@ if submitted:
     )
 else:
     st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
+
