@@ -15,6 +15,159 @@ st.markdown(
 
 st.markdown("---")
 
+# =========================
+# Διαθέσιμα μοντέλα αντλιών
+# =========================
+# Βάλε εδώ τα πραγματικά εμπορικά ονόματα/ERP μόλις είσαι έτοιμος.
+MODELS = [
+    {"name": "Αντλία 8 kW", "kw": 8},
+    {"name": "Αντλία 10 kW", "kw": 10},
+    {"name": "Αντλία 12 kW", "kw": 12},
+    {"name": "Αντλία 16 kW", "kw": 16},
+    {"name": "Αντλία 26 kW", "kw": 26},
+]
+
+
+# =========================
+# Helper: Εκτίμηση ισχύος αντλίας
+# =========================
+def estimate_heat_pump_kw(
+    area_m2,
+    year_category,
+    renovation_done,
+    renovation_options,
+    house_type,
+    apt_floor_position,
+    emission_type,
+    boiler_power_known,
+    boiler_power_unit,
+    boiler_power_value,
+    fuel_consumption_known,
+    fuel_consumption_type,
+    fuel_consumption_value,
+):
+    """
+    Πολύ απλή εμπειρική εκτίμηση ισχύος σε kW.
+    Δεν αντικαθιστά μελέτη μηχανικού – είναι για εμπορική προ-πρόταση.
+    """
+    if area_m2 is None or area_m2 <= 0:
+        return None, "Δεν δόθηκαν m², δεν μπορεί να γίνει εκτίμηση."
+
+    # Βάση W/m² ανά εποχή/ποιότητα κατασκευής
+    if year_category == "Πριν το 1980":
+        base_w_per_m2 = 110
+    elif year_category == "1980–2000":
+        base_w_per_m2 = 90
+    elif year_category == "2001–2009":
+        base_w_per_m2 = 75
+    else:  # 2010 και μετά
+        base_w_per_m2 = 60
+
+    # Μείωση λόγω ανακαινίσεων
+    if renovation_done == "Ναι":
+        reduction = 0
+        if renovation_options:
+            if "Θερμομόνωση κελύφους" in renovation_options:
+                reduction += 0.15
+            if "Θερμομόνωση δώματος / ταράτσας" in renovation_options:
+                reduction += 0.10
+            if "Αντικατάσταση κουφωμάτων" in renovation_options:
+                reduction += 0.10
+        reduction = min(reduction, 0.30)  # max -30%
+        base_w_per_m2 *= (1 - reduction)
+
+    # Προσαρμογή ανά τύπο κατοικίας & όροφο
+    if house_type == "Μονοκατοικία":
+        base_w_per_m2 *= 1.10  # περισσότερες απώλειες
+        apt_note = "Μονοκατοικία – ελαφρώς αυξημένες απώλειες."
+    else:
+        # Διαμέρισμα
+        if apt_floor_position == "Ενδιάμεσος όροφος":
+            base_w_per_m2 *= 0.85  # προστατευμένο
+            apt_note = "Διαμέρισμα ενδιάμεσο – λιγότερες απώλειες."
+        elif apt_floor_position == "Τελευταίος όροφος / ρετιρέ":
+            base_w_per_m2 *= 1.00
+            apt_note = "Διαμέρισμα τελευταίος όροφος – κανονικές προς αυξημένες απώλειες."
+        else:
+            apt_note = "Διαμέρισμα."
+
+    # Προσαρμογή ανά τύπο συστήματος εκπομπής
+    if emission_type == "Ενδοδαπέδια":
+        emis_note = "Ενδοδαπέδια – χαμηλές θερμοκρασίες, μπορείς να δουλεύεις με χαμηλότερα kW."
+        emis_factor = 0.9
+    elif emission_type == "Fan coil":
+        emis_note = "Fan coil – χαμηλές/μέσες θερμοκρασίες, καλό για αντλία."
+        emis_factor = 0.95
+    elif emission_type == "Μικτό σύστημα":
+        emis_note = "Μικτό σύστημα – κράτα λίγο παραπάνω απόθεμα."
+        emis_factor = 1.05
+    else:  # Καλοριφέρ
+        emis_note = "Καλοριφέρ – πιθανότατα χρειάζονται υψηλότερες θερμοκρασίες."
+        emis_factor = 1.05
+
+    base_w_per_m2 *= emis_factor
+
+    # Αρχική εκτίμηση από m²
+    design_kw_from_area = area_m2 * base_w_per_m2 / 1000  # W → kW
+
+    notes = []
+    notes.append(f"Βάση: ~{base_w_per_m2:.0f} W/m² μετά τις διορθώσεις.")
+    notes.append(apt_note)
+    notes.append(emis_note)
+
+    # Αν έχουμε γνωστή ισχύ λέβητα, την χρησιμοποιούμε σαν έλεγχο
+    kw_from_boiler = None
+    if boiler_power_known == "Ναι" and boiler_power_value and boiler_power_value > 0:
+        if boiler_power_unit == "kW":
+            kw_from_boiler = boiler_power_value
+        else:  # kcal/h
+            kw_from_boiler = boiler_power_value / 860.0
+        notes.append(f"Υπάρχει δήλωση ισχύος λέβητα: ~{kw_from_boiler:.1f} kW.")
+
+    # Αν έχουμε κατανάλωση, την αναφέρουμε ως στοιχείο (χωρίς ακριβή μετατροπή εδώ)
+    if fuel_consumption_known == "Ναι" and fuel_consumption_value and fuel_consumption_value > 0:
+        if fuel_consumption_type and fuel_consumption_type.startswith("Ποσότητα"):
+            notes.append(f"Δηλωμένη κατανάλωση καυσίμου: {fuel_consumption_value:.0f} λίτρα/κιλά.")
+        elif fuel_consumption_type:
+            notes.append(f"Δηλωμένο κόστος καυσίμου: {fuel_consumption_value:.0f} €.")
+
+    # Συνδυασμός εκτιμήσεων: αν έχουμε και λέβητα, κρατάμε range γύρω από μέσο όρο
+    if kw_from_boiler:
+        avg_kw = (design_kw_from_area + kw_from_boiler) / 2
+    else:
+        avg_kw = design_kw_from_area
+
+    # Δώσε range ±15%
+    low_kw = max(0, avg_kw * 0.85)
+    high_kw = avg_kw * 1.15
+
+    return (low_kw, high_kw, avg_kw), " ".join(notes)
+
+
+def pick_model_for_kw(hp_result):
+    """Διαλέγει μοντέλο από τη λίστα MODELS με βάση την εκτιμώμενη ισχύ."""
+    if hp_result is None:
+        return None
+
+    low_kw, high_kw, avg_kw = hp_result
+
+    # Μικρό safety factor (5%) πάνω από το μέσο
+    target_kw = avg_kw * 1.05
+
+    # Βρες το μικρότερο μοντέλο που είναι ≥ target_kw
+    suitable = [m for m in MODELS if m["kw"] >= target_kw]
+    if suitable:
+        chosen = sorted(suitable, key=lambda x: x["kw"])[0]
+    else:
+        # Αν είναι πολύ μεγάλο το σπίτι → πάρε το μεγαλύτερο (π.χ. 26 kW)
+        chosen = sorted(MODELS, key=lambda x: x["kw"])[-1]
+
+    return chosen
+
+
+# =========================
+# ΦΟΡΜΑ
+# =========================
 with st.form("heat_pump_form"):
     # ===== 1. Επιθυμίες & Τρόπος Αγοράς =====
     st.subheader("1. Επιθυμίες & Τρόπος Αγοράς")
@@ -74,7 +227,18 @@ with st.form("heat_pump_form"):
         ],
     )
 
-    # 🔹 ΝΕΟ: Ανακαίνιση / ενεργειακή αναβάθμιση
+    # Αν είναι διαμέρισμα → όροφος
+    apt_floor_position = None
+    if house_type == "Διαμέρισμα":
+        apt_floor_position = st.radio(
+            "Σε ποιον όροφο βρίσκεται το διαμέρισμα;",
+            ["Ενδιάμεσος όροφος", "Τελευταίος όροφος / ρετιρέ"],
+            horizontal=False,
+        )
+    else:
+        apt_floor_position = "—"
+
+    # Ανακαίνιση / ενεργειακή αναβάθμιση
     renovation_done = st.radio(
         "Έχει γίνει κάποια ανακαίνιση / ενεργειακή αναβάθμιση στο σπίτι;",
         ["Όχι", "Ναι"],
@@ -139,6 +303,12 @@ with st.form("heat_pump_form"):
         horizontal=True,
     )
 
+    # Τύπος εκπομπής θερμότητας
+    emission_type = st.radio(
+        "Με τι θερμαίνεται ο χώρος;",
+        ["Καλοριφέρ (σώματα)", "Ενδοδαπέδια", "Fan coil", "Μικτό σύστημα"],
+    )
+
     boiler_type = st.selectbox(
         "Τύπος λέβητα / πηγής θερμότητας:",
         [
@@ -153,7 +323,7 @@ with st.form("heat_pump_form"):
     if boiler_type == "Άλλο":
         boiler_other = st.text_input("Περιγραφή άλλου τύπου λέβητα / συστήματος:")
 
-    # 🔹 ΝΕΟ: Γνωστή ισχύς λέβητα
+    # Γνωστή ισχύς λέβητα
     boiler_power_known = st.radio(
         "Γνωρίζετε την ονομαστική ισχύ του υπάρχοντος λέβητα (kW ή kcal/h);",
         ["Ναι", "Όχι"],
@@ -170,7 +340,7 @@ with st.form("heat_pump_form"):
             step=0.1,
         )
 
-    # 🔹 ΝΕΟ: Κατανάλωση καυσίμου προηγούμενης σεζόν
+    # Κατανάλωση καυσίμου προηγούμενης σεζόν
     st.markdown("### Κατανάλωση καυσίμου προηγούμενης σεζόν")
 
     fuel_consumption_known = st.radio(
@@ -258,9 +428,31 @@ with st.form("heat_pump_form"):
 
     submitted = st.form_submit_button("✅ Υποβολή ερωτηματολογίου")
 
+# =========================
+# Μετά την υποβολή
+# =========================
 if submitted:
-    st.success("Η υποβολή καταχωρήθηκε. Δείτε παρακάτω τη σύνοψη για τον φάκελο του πελάτη.")
+    st.success("Η υποβολή καταχωρήθηκε. Δείτε παρακάτω τη σύνοψη και την προτεινόμενη ισχύ αντλίας.")
 
+    hp_result, hp_notes = estimate_heat_pump_kw(
+        area_m2=area_m2,
+        year_category=year_category,
+        renovation_done=renovation_done,
+        renovation_options=renovation_options,
+        house_type=house_type,
+        apt_floor_position=apt_floor_position,
+        emission_type=emission_type,
+        boiler_power_known=boiler_power_known,
+        boiler_power_unit=boiler_power_unit,
+        boiler_power_value=boiler_power_value,
+        fuel_consumption_known=fuel_consumption_known,
+        fuel_consumption_type=fuel_consumption_type,
+        fuel_consumption_value=fuel_consumption_value,
+    )
+
+    chosen_model = pick_model_for_kw(hp_result) if hp_result is not None else None
+
+    # Σύνοψη
     lines = []
     lines.append("=== ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ ΑΝΤΛΙΑΣ ΘΕΡΜΟΤΗΤΑΣ ===")
     lines.append(f"Ημερομηνία: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -273,6 +465,8 @@ if submitted:
     lines.append("")
     lines.append("2) Στοιχεία Κατοικίας")
     lines.append(f"- Τύπος κατοικίας: {house_type}")
+    if house_type == "Διαμέρισμα":
+        lines.append(f"- Όροφος: {apt_floor_position}")
     lines.append(f"- Εμβαδόν: {area_m2} m²")
     lines.append(f"- Χρονολογία κατασκευής: {year_category}")
     lines.append(f"- Ανακαίνιση/ενεργειακή αναβάθμιση: {renovation_done}")
@@ -288,7 +482,8 @@ if submitted:
     lines.append("")
     lines.append("3) Υφιστάμενο Σύστημα Θέρμανσης")
     lines.append(f"- Αλλαγή/προσθήκη σωμάτων: {change_radiators}")
-    lines.append(f"- Τρόπος θέρμανσης: {distribution_type}")
+    lines.append(f"- Τρόπος θέρμανσης (κεντρικό/αυτόνομο): {distribution_type}")
+    lines.append(f"- Τύπος εκπομπής: {emission_type}")
     lines.append(f"- Τύπος λέβητα/πηγής: {boiler_type}")
     if boiler_type == "Άλλο" and boiler_other:
         lines.append(f"  Περιγραφή: {boiler_other}")
@@ -299,9 +494,9 @@ if submitted:
     lines.append("Κατανάλωση καυσίμου προηγούμενης σεζόν")
     lines.append(f"- Γνωστή κατανάλωση: {fuel_consumption_known}")
     if fuel_consumption_known == "Ναι" and fuel_consumption_value is not None:
-        if fuel_consumption_type.startswith("Ποσότητα"):
+        if fuel_consumption_type and fuel_consumption_type.startswith("Ποσότητα"):
             lines.append(f"  Ποσότητα: {fuel_consumption_value} λίτρα/κιλά")
-        else:
+        elif fuel_consumption_type:
             lines.append(f"  Ποσό: {fuel_consumption_value} €")
     lines.append("")
     lines.append("4) Πρόσθετα Συστήματα & Τοποθέτηση")
@@ -327,11 +522,30 @@ if submitted:
     lines.append(f"- Email: {email}")
     lines.append(f"- Διεύθυνση ακινήτου: {address}")
 
+    # Προτεινόμενη ισχύς αντλίας
+    lines.append("")
+    lines.append("6) Ενδεικτική προτεινόμενη ισχύς αντλίας (υπολογισμός καταστήματος)")
+    if hp_result is not None:
+        low_kw, high_kw, avg_kw = hp_result
+        lines.append(f"- Εκτιμώμενο εύρος: {low_kw:.1f} – {high_kw:.1f} kW (κέντρο ~{avg_kw:.1f} kW)")
+        lines.append(f"- Σημείωση: {hp_notes}")
+        if chosen_model is not None:
+            lines.append(f"- Προτεινόμενο μοντέλο (βάσει γκάμας): {chosen_model['name']} (~{chosen_model['kw']} kW)")
+        lines.append("⚠ Η εκτίμηση είναι εμπειρική και δεν αντικαθιστά μελέτη μηχανικού.")
+    else:
+        lines.append("- Δεν μπορεί να γίνει εκτίμηση (λείπουν βασικά στοιχεία m²).")
+
     summary_text = "\n".join(lines)
+
+    # Εμφάνιση στο app
+    if chosen_model is not None and hp_result is not None:
+        st.markdown("### 💡 Προτεινόμενο μοντέλο αντλίας")
+        st.write(f"**{chosen_model['name']}** (ονομαστική ισχύς ~{chosen_model['kw']} kW)")
 
     st.markdown("### 📄 Σύνοψη απαντήσεων")
     st.text(summary_text)
 
+    # Κουμπί λήψης ως αρχείο κειμένου
     file_name = "questionnaire_heat_pump.txt"
     st.download_button(
         "⬇️ Κατέβασμα σύνοψης (txt)",
@@ -341,11 +555,8 @@ if submitted:
     )
 
     st.info(
-        "Μπορείτε να εκτυπώσετε τη σύνοψη ή να την αποθηκεύσετε στον φάκελο του πελάτη "
-        "μαζί με την πρόταση αντλίας."
+        "Η προτεινόμενη ισχύς είναι ενδεικτική, για εμπορική συζήτηση. "
+        "Για τελική επιλογή απαιτείται μελέτη από μηχανικό."
     )
 else:
     st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
-
-    st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
-
