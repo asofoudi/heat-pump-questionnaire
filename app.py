@@ -1,14 +1,19 @@
 import streamlit as st
 from datetime import datetime
+import smtplib
+from email.mime.text import MIMEText
 
+# -------------------------------------------------
+# Ρυθμίσεις σελίδας + logo
+# -------------------------------------------------
 st.set_page_config(
     page_title="Ερωτηματολόγιο Αντλίας Θερμότητας",
-    page_icon="logo.png",  # εδώ το logo σου
+    page_icon="logo.png",  # αρχείο logo στο repo
     layout="centered",
 )
+
 st.image("logo.png", width=180)
 st.title("🔥 Αλλαγή Συστήματος Θέρμανσης – Επιλογή Αντλίας Θερμότητας")
-
 st.markdown(
     "Συμπληρώστε τις παρακάτω πληροφορίες ώστε να μπορέσουμε "
     "να σας προτείνουμε την κατάλληλη αντλία θερμότητας για τον χώρο σας."
@@ -26,6 +31,33 @@ MODELS = [
     {"name": "Αντλία 16 kW", "kw": 16},
     {"name": "Αντλία 26 kW", "kw": 26},
 ]
+
+# =========================
+# Αποστολή email με σύνοψη
+# =========================
+def send_email(summary_text: str):
+    """
+    Στέλνει τη σύνοψη στο email που έχουμε ορίσει στα secrets.
+    st.secrets["email"]["user"], ["password"], ["to"]
+    """
+    try:
+        email_user = st.secrets["email"]["user"]
+        email_password = st.secrets["email"]["password"]
+        email_to = st.secrets["email"]["to"]
+
+        msg = MIMEText(summary_text, _charset="utf-8")
+        msg["Subject"] = "Νέο ερωτηματολόγιο αντλίας θερμότητας"
+        msg["From"] = email_user
+        msg["To"] = email_to
+
+        # Gmail SMTP (SSL). Αν χρησιμοποιήσεις άλλο provider, αλλάζεις αυτά.
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(email_user, email_password)
+            server.send_message(msg)
+
+    except Exception as e:
+        # Να μην σκάει το app αν αποτύχει το email
+        st.warning(f"Δεν στάλθηκε email αυτόματα (σφάλμα: {e})")
 
 
 # =========================
@@ -124,7 +156,7 @@ def estimate_heat_pump_kw(
             kw_from_boiler = boiler_power_value / 860.0
         notes.append(f"Υπάρχει δήλωση ισχύος λέβητα: ~{kw_from_boiler:.1f} kW.")
 
-    # Αν έχουμε κατανάλωση, την αναφέρουμε ως στοιχείο (χωρίς ακριβή μετατροπή εδώ)
+    # Αν έχουμε κατανάλωση, την αναφέρουμε ως στοιχείο
     if fuel_consumption_known == "Ναι" and fuel_consumption_value and fuel_consumption_value > 0:
         if fuel_consumption_type and fuel_consumption_type.startswith("Ποσότητα"):
             notes.append(f"Δηλωμένη κατανάλωση καυσίμου: {fuel_consumption_value:.0f} λίτρα/κιλά.")
@@ -159,7 +191,6 @@ def pick_model_for_kw(hp_result):
     if suitable:
         chosen = sorted(suitable, key=lambda x: x["kw"])[0]
     else:
-        # Αν είναι πολύ μεγάλο το σπίτι → πάρε το μεγαλύτερο (π.χ. 26 kW)
         chosen = sorted(MODELS, key=lambda x: x["kw"])[-1]
 
     return chosen
@@ -227,7 +258,7 @@ with st.form("heat_pump_form"):
         ],
     )
 
-    # 👉 ΠΑΝΤΑ ΟΡΑΤΗ ερώτηση για θέση κατοικίας
+    # Πάντα ορατή ερώτηση για θέση κατοικίας
     apt_floor_position = st.radio(
         "Θέση κατοικίας στο κτήριο (αν είναι μονοκατοικία, διάλεξε 'Δεν ισχύει'):",
         ["Δεν ισχύει (μονοκατοικία)", "Ενδιάμεσος όροφος", "Τελευταίος όροφος / ρετιρέ"],
@@ -532,6 +563,9 @@ if submitted:
 
     summary_text = "\n".join(lines)
 
+    # 🔔 Αποστολή email με σύνοψη
+    send_email(summary_text)
+
     # Εμφάνιση στο app
     if chosen_model is not None and hp_result is not None:
         st.markdown("### 💡 Προτεινόμενο μοντέλο αντλίας")
@@ -554,4 +588,3 @@ if submitted:
     )
 else:
     st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
-
