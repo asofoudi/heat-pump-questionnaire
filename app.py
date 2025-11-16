@@ -18,7 +18,6 @@ st.markdown("---")
 # =========================
 # Διαθέσιμα μοντέλα αντλιών
 # =========================
-# Βάλε εδώ τα πραγματικά εμπορικά ονόματα/ERP μόλις είσαι έτοιμος.
 MODELS = [
     {"name": "Αντλία 8 kW", "kw": 8},
     {"name": "Αντλία 10 kW", "kw": 10},
@@ -77,7 +76,7 @@ def estimate_heat_pump_kw(
         base_w_per_m2 *= (1 - reduction)
 
     # Προσαρμογή ανά τύπο κατοικίας & όροφο
-    if house_type == "Μονοκατοικία":
+    if house_type == "Μονοκατοικία" or apt_floor_position.startswith("Δεν ισχύει"):
         base_w_per_m2 *= 1.10  # περισσότερες απώλειες
         apt_note = "Μονοκατοικία – ελαφρώς αυξημένες απώλειες."
     else:
@@ -227,16 +226,12 @@ with st.form("heat_pump_form"):
         ],
     )
 
-    # Αν είναι διαμέρισμα → όροφος
-    apt_floor_position = None
-    if house_type == "Διαμέρισμα":
-        apt_floor_position = st.radio(
-            "Σε ποιον όροφο βρίσκεται το διαμέρισμα;",
-            ["Ενδιάμεσος όροφος", "Τελευταίος όροφος / ρετιρέ"],
-            horizontal=False,
-        )
-    else:
-        apt_floor_position = "—"
+    # 👉 ΠΑΝΤΑ ΟΡΑΤΗ ερώτηση για θέση κατοικίας
+    apt_floor_position = st.radio(
+        "Θέση κατοικίας στο κτήριο (αν είναι μονοκατοικία, διάλεξε 'Δεν ισχύει'):",
+        ["Δεν ισχύει (μονοκατοικία)", "Ενδιάμεσος όροφος", "Τελευταίος όροφος / ρετιρέ"],
+        horizontal=False,
+    )
 
     # Ανακαίνιση / ενεργειακή αναβάθμιση
     renovation_done = st.radio(
@@ -465,8 +460,7 @@ if submitted:
     lines.append("")
     lines.append("2) Στοιχεία Κατοικίας")
     lines.append(f"- Τύπος κατοικίας: {house_type}")
-    if house_type == "Διαμέρισμα":
-        lines.append(f"- Όροφος: {apt_floor_position}")
+    lines.append(f"- Θέση στο κτήριο: {apt_floor_position}")
     lines.append(f"- Εμβαδόν: {area_m2} m²")
     lines.append(f"- Χρονολογία κατασκευής: {year_category}")
     lines.append(f"- Ανακαίνιση/ενεργειακή αναβάθμιση: {renovation_done}")
@@ -545,7 +539,6 @@ if submitted:
     st.markdown("### 📄 Σύνοψη απαντήσεων")
     st.text(summary_text)
 
-    # Κουμπί λήψης ως αρχείο κειμένου
     file_name = "questionnaire_heat_pump.txt"
     st.download_button(
         "⬇️ Κατέβασμα σύνοψης (txt)",
