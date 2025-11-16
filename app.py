@@ -1,6 +1,5 @@
 import streamlit as st
 from datetime import datetime
-import textwrap
 
 st.set_page_config(
     page_title="Ερωτηματολόγιο Αντλίας Θερμότητας",
@@ -75,6 +74,29 @@ with st.form("heat_pump_form"):
         ],
     )
 
+    # 🔹 ΝΕΟ: Ανακαίνιση / ενεργειακή αναβάθμιση
+    renovation_done = st.radio(
+        "Έχει γίνει κάποια ανακαίνιση / ενεργειακή αναβάθμιση στο σπίτι;",
+        ["Όχι", "Ναι"],
+        horizontal=True,
+    )
+
+    renovation_options = []
+    renovation_other = ""
+    if renovation_done == "Ναι":
+        renovation_options = st.multiselect(
+            "Τι έχει γίνει;",
+            [
+                "Θερμομόνωση κελύφους",
+                "Θερμομόνωση δώματος / ταράτσας",
+                "Αντικατάσταση κουφωμάτων",
+                "Αλλαγή λεβητοστασίου / συστήματος",
+                "Άλλο",
+            ],
+        )
+        if "Άλλο" in renovation_options:
+            renovation_other = st.text_input("Περιγράψτε άλλες επεμβάσεις:")
+
     project_type = st.radio(
         "Το έργο αφορά:",
         ["Απλή αντικατάσταση", "Ανακαίνιση", "Νεόδμητο σπίτι"],
@@ -130,6 +152,52 @@ with st.form("heat_pump_form"):
     boiler_other = ""
     if boiler_type == "Άλλο":
         boiler_other = st.text_input("Περιγραφή άλλου τύπου λέβητα / συστήματος:")
+
+    # 🔹 ΝΕΟ: Γνωστή ισχύς λέβητα
+    boiler_power_known = st.radio(
+        "Γνωρίζετε την ονομαστική ισχύ του υπάρχοντος λέβητα (kW ή kcal/h);",
+        ["Ναι", "Όχι"],
+        horizontal=True,
+    )
+
+    boiler_power_unit = None
+    boiler_power_value = None
+    if boiler_power_known == "Ναι":
+        boiler_power_unit = st.selectbox("Μονάδα ισχύος:", ["kW", "kcal/h"])
+        boiler_power_value = st.number_input(
+            "Ισχύς λέβητα",
+            min_value=0.0,
+            step=0.1,
+        )
+
+    # 🔹 ΝΕΟ: Κατανάλωση καυσίμου προηγούμενης σεζόν
+    st.markdown("### Κατανάλωση καυσίμου προηγούμενης σεζόν")
+
+    fuel_consumption_known = st.radio(
+        "Γνωρίζετε περίπου την κατανάλωση καυσίμου την προηγούμενη σεζόν;",
+        ["Ναι", "Όχι"],
+        horizontal=True,
+    )
+
+    fuel_consumption_type = None
+    fuel_consumption_value = None
+    if fuel_consumption_known == "Ναι":
+        fuel_consumption_type = st.radio(
+            "Σε τι μονάδα μπορείτε να την δώσετε;",
+            ["Ποσότητα (λίτρα / κιλά)", "Ποσό σε €"],
+        )
+        if fuel_consumption_type.startswith("Ποσότητα"):
+            fuel_consumption_value = st.number_input(
+                "Ποσότητα καυσίμου (λίτρα / κιλά)",
+                min_value=0.0,
+                step=1.0,
+            )
+        else:
+            fuel_consumption_value = st.number_input(
+                "Κόστος καυσίμου την προηγούμενη σεζόν (€)",
+                min_value=0.0,
+                step=50.0,
+            )
 
     st.markdown("---")
 
@@ -193,9 +261,7 @@ with st.form("heat_pump_form"):
 if submitted:
     st.success("Η υποβολή καταχωρήθηκε. Δείτε παρακάτω τη σύνοψη για τον φάκελο του πελάτη.")
 
-    # Δημιουργία κειμένου σύνοψης
     lines = []
-
     lines.append("=== ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ ΑΝΤΛΙΑΣ ΘΕΡΜΟΤΗΤΑΣ ===")
     lines.append(f"Ημερομηνία: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
     lines.append("")
@@ -209,6 +275,11 @@ if submitted:
     lines.append(f"- Τύπος κατοικίας: {house_type}")
     lines.append(f"- Εμβαδόν: {area_m2} m²")
     lines.append(f"- Χρονολογία κατασκευής: {year_category}")
+    lines.append(f"- Ανακαίνιση/ενεργειακή αναβάθμιση: {renovation_done}")
+    if renovation_done == "Ναι":
+        lines.append(f"  Επεμβάσεις: {', '.join(renovation_options) if renovation_options else '—'}")
+        if renovation_other:
+            lines.append(f"  Άλλες επεμβάσεις: {renovation_other}")
     lines.append(f"- Έργο: {project_type}")
     lines.append(f"- Ρεύμα: {power_type}")
     lines.append(f"- Χρήση αντλίας: {usage_type}")
@@ -221,6 +292,17 @@ if submitted:
     lines.append(f"- Τύπος λέβητα/πηγής: {boiler_type}")
     if boiler_type == "Άλλο" and boiler_other:
         lines.append(f"  Περιγραφή: {boiler_other}")
+    lines.append(f"- Γνωστή ισχύς λέβητα: {boiler_power_known}")
+    if boiler_power_known == "Ναι" and boiler_power_value is not None:
+        lines.append(f"  Ισχύς λέβητα: {boiler_power_value} {boiler_power_unit}")
+    lines.append("")
+    lines.append("Κατανάλωση καυσίμου προηγούμενης σεζόν")
+    lines.append(f"- Γνωστή κατανάλωση: {fuel_consumption_known}")
+    if fuel_consumption_known == "Ναι" and fuel_consumption_value is not None:
+        if fuel_consumption_type.startswith("Ποσότητα"):
+            lines.append(f"  Ποσότητα: {fuel_consumption_value} λίτρα/κιλά")
+        else:
+            lines.append(f"  Ποσό: {fuel_consumption_value} €")
     lines.append("")
     lines.append("4) Πρόσθετα Συστήματα & Τοποθέτηση")
     lines.append(f"- Ηλιακός θερμοσίφωνας: {has_solar}")
@@ -250,7 +332,6 @@ if submitted:
     st.markdown("### 📄 Σύνοψη απαντήσεων")
     st.text(summary_text)
 
-    # Κουμπί λήψης ως αρχείο κειμένου
     file_name = "questionnaire_heat_pump.txt"
     st.download_button(
         "⬇️ Κατέβασμα σύνοψης (txt)",
@@ -265,3 +346,6 @@ if submitted:
     )
 else:
     st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
+
+    st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
+
