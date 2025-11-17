@@ -2,17 +2,23 @@ import streamlit as st
 from datetime import datetime
 import smtplib
 from email.mime.text import MIMEText
+import math
 
 # -------------------------------------------------
 # Ρυθμίσεις σελίδας + logo
 # -------------------------------------------------
 st.set_page_config(
     page_title="Ερωτηματολόγιο Αντλίας Θερμότητας",
-    page_icon="logo.png",  # αρχείο logo στο repo
+    page_icon="logo.png",  # αρχείο logo στο repo (προαιρετικό)
     layout="centered",
 )
 
-st.image("logo.png", width=180)
+# Logo (αν δεν υπάρχει, απλά το αγνοούμε)
+try:
+    st.image("logo.png", width=180)
+except Exception:
+    pass
+
 st.title("🔥 Αλλαγή Συστήματος Θέρμανσης – Επιλογή Αντλίας Θερμότητας")
 st.markdown(
     "Συμπληρώστε τις παρακάτω πληροφορίες ώστε να μπορέσουμε "
@@ -26,6 +32,7 @@ st.markdown("---")
 # =========================
 MODELS = [
     {"name": "Αντλία 8 kW", "kw": 8},
+    {"name": "Αντλία 9 kW", "kw": 9},
     {"name": "Αντλία 10 kW", "kw": 10},
     {"name": "Αντλία 12 kW", "kw": 12},
     {"name": "Αντλία 16 kW", "kw": 16},
@@ -38,7 +45,10 @@ MODELS = [
 def send_email(summary_text: str):
     """
     Στέλνει τη σύνοψη στο email που έχουμε ορίσει στα secrets.
-    st.secrets["email"]["user"], ["password"], ["to"]
+    Περιμένει:
+    st.secrets["email"]["user"]
+    st.secrets["email"]["password"]
+    st.secrets["email"]["to"]
     """
     try:
         email_user = st.secrets["email"]["user"]
@@ -50,12 +60,12 @@ def send_email(summary_text: str):
         msg["From"] = email_user
         msg["To"] = email_to
 
-        # Gmail SMTP (SSL)
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(email_user, email_password)
             server.send_message(msg)
 
     except Exception as e:
+        # Αν δεν έχουν στηθεί τα secrets ή κάτι πάει στραβά, απλά δείξε μήνυμα
         st.warning(f"Δεν στάλθηκε email αυτόματα (σφάλμα: {e})")
 
 
@@ -492,7 +502,7 @@ if submitted:
 
     chosen_model = pick_model_for_kw(hp_result) if hp_result is not None else None
 
-    # ===== Εκτίμηση κόστους (πολύ απλή, ενδεικτική) =====
+    # ===== Εκτίμηση κόστους (με τιμές καταλόγου & voucher) =====
     total_cost = None
     customer_cost = None
     monthly_info = ""
@@ -503,26 +513,27 @@ if submitted:
         if funding_rate_choice == "60%":
             subsidy_rate = 0.60
         else:
-            subsidy_rate = 0.50  # default
+            subsidy_rate = 0.50  # default 50% αν δεν δηλωθεί κάτι άλλο
     else:
         subsidy_rate = 0.0
 
     if chosen_model is not None:
         kw = chosen_model["kw"]
 
-        # ΕΝΔΕΙΚΤΙΚΕΣ τιμές – προσαρμόζεις εσύ στις πραγματικές
+        # ΤΙΜΕΣ ΑΠΟ ΤΟΝ ΚΑΤΑΛΟΓΟ (προσαρμόζεις όπου χρειάζεται)
         base_prices = {
-            8: 5000,
-            10: 5500,
-            12: 6000,
-            16: 7500,
-            26: 10000,
+            8: 3240,   # Immergas 8kW
+            9: 3490,   # Hyundai 9kW
+            10: 4000,  # ενδεικτική τιμή 10kW
+            12: 4350,  # περίπου μέση τιμή για 12kW
+            16: 4590,  # περίπου τιμή 16kW
+            26: 7410,  # Immergas 26kW
         }
-        pump_cost = base_prices.get(kw, 6000)
+        pump_cost = base_prices.get(kw, 4350)
 
-        # Εργασίες & υλικά (υδραυλικά + ηλεκτρολογικά) – χοντρικά
-        hyd_labor = 800 + 20 * kw
-        elec_labor = 400 + 10 * kw
+        # Εργασίες & υλικά (υδραυλικά + ηλεκτρολογικά)
+        hyd_labor = 500 + 20 * kw        # σταθερά 500
+        elec_labor = 300 + 10 * kw       # σταθερά 300
         hyd_materials = 500 + 15 * kw
         elec_materials = 300 + 10 * kw
 
@@ -536,24 +547,50 @@ if submitted:
             elif solar_people_band == "Πάνω από 5 άτομα":
                 solar_cost = 2600
             else:
-                solar_cost = 2000  # default, αν για κάποιο λόγο δεν έχει δοθεί
+                solar_cost = 2000
 
         total_cost = pump_cost + hyd_labor + elec_labor + hyd_materials + elec_materials + solar_cost
-        customer_cost = total_cost * (1 - subsidy_rate)
 
-        # Δόσεις (ενδεικτικές)
-        if wants_installments == "Ναι" and customer_cost is not None and monthly_pref is not None:
+        # Υπόλοιπο πελάτη μετά την επιδότηση (αυτό είναι που χρηματοδοτούμε)
+        principal = total_cost * (1 - subsidy_rate)
+        customer_cost = principal
+
+        # Δόσεις με επιτόκιο 13%
+        if wants_installments == "Ναι" and principal > 0 and monthly_pref is not None:
             mid_map = {
                 "50–100 €": 75,
                 "100–150 €": 125,
                 "200–250 €": 225,
             }
-            mid_val = mid_map.get(monthly_pref)
-            if mid_val:
-                months = max(1, int(round(customer_cost / mid_val)))
-                monthly_info = f"Για να είστε περίπου στα {monthly_pref} τον μήνα, μιλάμε για ~{months} δόσεις."
+            target_monthly = mid_map.get(monthly_pref)
 
-    # Σύνοψη
+            if target_monthly and target_monthly > 0:
+                r = 0.13 / 12.0  # μηνιαίο επιτόκιο 13% ετησίως
+                # Αν r * P >= target, πάμε στο μέγιστο δόσεων
+                if r * principal >= target_monthly:
+                    months = 84
+                else:
+                    # n = ln(target / (target - rP)) / ln(1+r)
+                    months_real = math.log(
+                        target_monthly / (target_monthly - r * principal)
+                    ) / math.log(1 + r)
+                    months = int(round(months_real))
+
+                # Περιορισμός 6–84 μήνες
+                months = min(max(months, 6), 84)
+
+                # Πραγματική δόση με τον κλασικό τύπο δανείου
+                monthly_payment = principal * r / (1 - (1 + r) ** (-months))
+
+                monthly_info = (
+                    f"Για υπόλοιπο περίπου {principal:,.0f} € μετά την επιδότηση, "
+                    f"με επιτόκιο 13% βγαίνουν περίπου {months} δόσεις "
+                    f"των ~{monthly_payment:,.0f} €."
+                )
+
+    # =========================
+    # Σύνοψη για εσένα + Email
+    # =========================
     lines = []
     lines.append("=== ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ ΑΝΤΛΙΑΣ ΘΕΡΜΟΤΗΤΑΣ ===")
     lines.append(f"Ημερομηνία: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
@@ -582,7 +619,7 @@ if submitted:
         if renovation_other:
             lines.append(f"  Άλλες επεμβάσεις: {renovation_other}")
     lines.append(f"- Ρεύμα: {power_type}")
-    lines.append(f"- Χρήση αντλής: {usage_type}")
+    lines.append(f"- Χρήση αντλίας: {usage_type}")
     if "ΖΝΧ" in usage_type:
         lines.append(f"- Άτομα για ΖΝΧ (αριθμός): {znx_people}")
     lines.append("")
@@ -646,7 +683,7 @@ if submitted:
         lines.append(f"- Συνολικό ενδεικτικό κόστος εξοπλισμού & εργασιών: ~{total_cost:,.0f} €")
         if program_purchase == "Ναι":
             lines.append(f"- Επιδοτούμενο ποσοστό που χρησιμοποιήθηκε στον υπολογισμό: {int(subsidy_rate * 100)}%")
-        lines.append(f"- Εκτιμώμενο κόστος για τον πελάτη: ~{customer_cost:,.0f} €")
+        lines.append(f"- Εκτιμώμενο κόστος για τον πελάτη (μετά την επιδότηση): ~{customer_cost:,.0f} €")
         if wants_installments == "Ναι" and monthly_info:
             lines.append(f"- Δόσεις (ενδεικτικά): {monthly_info}")
     else:
