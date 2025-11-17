@@ -584,7 +584,7 @@ if submitted:
 
                 monthly_info = (
                     f"Για υπόλοιπο περίπου {principal:,.0f} € μετά την επιδότηση, "
-                    f"με επιτόκιο 13% βγαίνουν περίπου {months} δόσεις "
+                    f"βγαίνουν περίπου {months} δόσεις "
                     f"των ~{monthly_payment:,.0f} €."
                 )
 
