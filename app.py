@@ -80,8 +80,8 @@ def estimate_heat_pump_kw(
     """
     Πολύ απλή εμπειρική εκτίμηση ισχύος σε kW.
     Δεν αντικαθιστά μελέτη μηχανικού – είναι για εμπορική προ-πρόταση.
-    ΣΗΜΑΝΤΙΚΟ: η ισχύς λέβητα και η κατανάλωση ΔΕΝ
-    επηρεάζουν τον υπολογισμό, μπαίνουν μόνο ως πληροφορία.
+    ΣΗΜΑΝΤΙΚΟ: η ισχύς λέβητα και η κατανάλωση ΔΕΝ επηρεάζουν
+    τον υπολογισμό, μπαίνουν μόνο ως πληροφορία.
     """
     if area_m2 is None or area_m2 <= 0:
         return None, "Δεν δόθηκαν m², δεν μπορεί να γίνει εκτίμηση."
@@ -175,7 +175,7 @@ def pick_model_for_kw(hp_result):
     if hp_result is None:
         return None
 
-    low_kw, high_kw, avg_kw = hp_result
+    _, _, avg_kw = hp_result
     target_kw = avg_kw * 1.05  # μικρό safety factor
 
     suitable = [m for m in MODELS if m["kw"] >= target_kw]
@@ -208,6 +208,14 @@ with col2:
         horizontal=True,
     )
 
+funding_rate_choice = None
+if program_purchase == "Ναι":
+    funding_rate_choice = st.radio(
+        "Ποιο είναι περίπου το ποσοστό χρηματοδότησης;",
+        ["50%", "60%", "Δεν γνωρίζω / δεν έχει οριστεί"],
+        horizontal=True,
+    )
+
 col3, col4 = st.columns(2)
 with col3:
     interest_type = st.radio(
@@ -218,6 +226,29 @@ with col4:
     has_engineer_study = st.radio(
         "Έχετε μελέτη μηχανικού για την απαιτούμενη ισχύ;",
         ["Ναι", "Όχι"],
+        horizontal=True,
+    )
+
+# Δόσεις
+wants_installments = st.radio(
+    "Σας ενδιαφέρει αγορά με δόσεις;",
+    ["Όχι", "Ναι"],
+    horizontal=True,
+)
+monthly_pref = None
+if wants_installments == "Ναι":
+    monthly_pref = st.radio(
+        "Επιθυμητή μηνιαία δόση (περίπου):",
+        ["50–100 €", "100–150 €", "200–250 €"],
+        horizontal=True,
+    )
+
+# Αντλία & Ηλιακός → άτομα στο σπίτι
+solar_people_band = None
+if interest_type == "Αντλία & Ηλιακός":
+    solar_people_band = st.radio(
+        "Για τον ηλιακό, πόσα άτομα θα μένουν στο σπίτι;",
+        ["3–4 άτομα", "4–5 άτομα", "Πάνω από 5 άτομα"],
         horizontal=True,
     )
 
@@ -292,7 +323,7 @@ with col8:
 znx_people = None
 if "ΖΝΧ" in usage_type:
     znx_people = st.number_input(
-        "Αν χρειάζεστε ΖΝΧ, πόσα άτομα θα μένουν στο σπίτι;",
+        "Αν χρειάζεστε ΖΝΧ, πόσα άτομα θα μένουν στο σπίτι (αριθμός);",
         min_value=0,
         step=1,
     )
@@ -461,6 +492,67 @@ if submitted:
 
     chosen_model = pick_model_for_kw(hp_result) if hp_result is not None else None
 
+    # ===== Εκτίμηση κόστους (πολύ απλή, ενδεικτική) =====
+    total_cost = None
+    customer_cost = None
+    monthly_info = ""
+    subsidy_rate = 0.0
+
+    # ποσοστό επιδότησης
+    if program_purchase == "Ναι":
+        if funding_rate_choice == "60%":
+            subsidy_rate = 0.60
+        else:
+            subsidy_rate = 0.50  # default
+    else:
+        subsidy_rate = 0.0
+
+    if chosen_model is not None:
+        kw = chosen_model["kw"]
+
+        # ΕΝΔΕΙΚΤΙΚΕΣ τιμές – προσαρμόζεις εσύ στις πραγματικές
+        base_prices = {
+            8: 5000,
+            10: 5500,
+            12: 6000,
+            16: 7500,
+            26: 10000,
+        }
+        pump_cost = base_prices.get(kw, 6000)
+
+        # Εργασίες & υλικά (υδραυλικά + ηλεκτρολογικά) – χοντρικά
+        hyd_labor = 800 + 20 * kw
+        elec_labor = 400 + 10 * kw
+        hyd_materials = 500 + 15 * kw
+        elec_materials = 300 + 10 * kw
+
+        # Ηλιακός (αν έχει επιλεγεί)
+        solar_cost = 0
+        if interest_type == "Αντλία & Ηλιακός":
+            if solar_people_band == "3–4 άτομα":
+                solar_cost = 1800
+            elif solar_people_band == "4–5 άτομα":
+                solar_cost = 2200
+            elif solar_people_band == "Πάνω από 5 άτομα":
+                solar_cost = 2600
+            else:
+                solar_cost = 2000  # default, αν για κάποιο λόγο δεν έχει δοθεί
+
+        total_cost = pump_cost + hyd_labor + elec_labor + hyd_materials + elec_materials + solar_cost
+        customer_cost = total_cost * (1 - subsidy_rate)
+
+        # Δόσεις (ενδεικτικές)
+        if wants_installments == "Ναι" and customer_cost is not None and monthly_pref is not None:
+            mid_map = {
+                "50–100 €": 75,
+                "100–150 €": 125,
+                "200–250 €": 225,
+            }
+            mid_val = mid_map.get(monthly_pref)
+            if mid_val:
+                months = max(1, int(round(customer_cost / mid_val)))
+                monthly_info = f"Για να είστε περίπου στα {monthly_pref} τον μήνα, μιλάμε για ~{months} δόσεις."
+
     # Σύνοψη
     lines = []
     lines.append("=== ΕΡΩΤΗΜΑΤΟΛΟΓΙΟ ΑΝΤΛΙΑΣ ΘΕΡΜΟΤΗΤΑΣ ===")
@@ -469,8 +561,15 @@ if submitted:
     lines.append("1) Επιθυμίες & Τρόπος Αγοράς")
     lines.append(f"- Εγκατάσταση: {install_interest}")
     lines.append(f"- Αγορά μέσω προγράμματος: {program_purchase}")
+    if program_purchase == "Ναι":
+        lines.append(f"- Ποσοστό χρηματοδότησης (δηλωμένο): {funding_rate_choice or '50% (default)'}")
     lines.append(f"- Ενδιαφέρον: {interest_type}")
+    if interest_type == "Αντλία & Ηλιακός":
+        lines.append(f"- Ηλιακός: άτομα στο σπίτι: {solar_people_band}")
     lines.append(f"- Μελέτη μηχανικού: {has_engineer_study}")
+    lines.append(f"- Δόσεις: {wants_installments}")
+    if wants_installments == "Ναι":
+        lines.append(f"  Επιθυμητή μηνιαία δόση: {monthly_pref}")
     lines.append("")
     lines.append("2) Στοιχεία Κατοικίας")
     lines.append(f"- Τύπος κατοικίας: {house_type}")
@@ -483,9 +582,9 @@ if submitted:
         if renovation_other:
             lines.append(f"  Άλλες επεμβάσεις: {renovation_other}")
     lines.append(f"- Ρεύμα: {power_type}")
-    lines.append(f"- Χρήση αντλίας: {usage_type}")
+    lines.append(f"- Χρήση αντλής: {usage_type}")
     if "ΖΝΧ" in usage_type:
-        lines.append(f"- Άτομα για ΖΝΧ: {znx_people}")
+        lines.append(f"- Άτομα για ΖΝΧ (αριθμός): {znx_people}")
     lines.append("")
     lines.append("3) Υφιστάμενο Σύστημα Θέρμανσης")
     lines.append(f"- Αλλαγή/προσθήκη σωμάτων: {change_radiators}")
@@ -541,6 +640,18 @@ if submitted:
     else:
         lines.append("- Δεν μπορεί να γίνει εκτίμηση (λείπουν βασικά στοιχεία m²).")
 
+    lines.append("")
+    lines.append("7) Ενδεικτική τάξη μεγέθους κόστους (με ΦΠΑ)")
+    if total_cost is not None:
+        lines.append(f"- Συνολικό ενδεικτικό κόστος εξοπλισμού & εργασιών: ~{total_cost:,.0f} €")
+        if program_purchase == "Ναι":
+            lines.append(f"- Επιδοτούμενο ποσοστό που χρησιμοποιήθηκε στον υπολογισμό: {int(subsidy_rate * 100)}%")
+        lines.append(f"- Εκτιμώμενο κόστος για τον πελάτη: ~{customer_cost:,.0f} €")
+        if wants_installments == "Ναι" and monthly_info:
+            lines.append(f"- Δόσεις (ενδεικτικά): {monthly_info}")
+    else:
+        lines.append("- Δεν υπολογίστηκε κόστος (λείπουν στοιχεία για την αντλία).")
+
     summary_text = "\n".join(lines)
 
     # Αποστολή email
@@ -550,6 +661,13 @@ if submitted:
     if chosen_model is not None and hp_result is not None:
         st.markdown("### 💡 Προτεινόμενο μοντέλο αντλίας")
         st.write(f"**{chosen_model['name']}** (ονομαστική ισχύς ~{chosen_model['kw']} kW)")
+
+    if total_cost is not None:
+        st.markdown("### 💰 Ενδεικτική τάξη μεγέθους κόστους")
+        st.write(f"Συνολικό περίπου κόστος εξοπλισμού & εργασιών: **~{total_cost:,.0f} €**")
+        st.write(f"Εκτιμώμενο κόστος για τον πελάτη: **~{customer_cost:,.0f} €**")
+        if wants_installments == "Ναι" and monthly_info:
+            st.write(monthly_info)
 
     st.markdown("### 📄 Σύνοψη απαντήσεων")
     st.text(summary_text)
@@ -562,8 +680,8 @@ if submitted:
     )
 
     st.info(
-        "Η προτεινόμενη ισχύς είναι ενδεικτική, για εμπορική συζήτηση. "
-        "Για τελική επιλογή απαιτείται μελέτη από μηχανικό."
+        "Η προτεινόμενη ισχύς και το κόστος είναι ενδεικτικά, για εμπορική συζήτηση. "
+        "Για τελική επιλογή και προσφορά απαιτείται μελέτη από μηχανικό."
     )
 else:
     st.info("Συμπλήρωσε τα στοιχεία και πάτησε «Υποβολή ερωτηματολογίου».")
